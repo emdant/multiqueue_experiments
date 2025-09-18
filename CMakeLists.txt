@@ -8,6 +8,7 @@ project(
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(utils)
 include(CMakeDependentOption)
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 disable_intree_builds()
 
@@ -63,7 +64,7 @@ endif()
 add_subdirectory(multiqueue)
 add_subdirectory(wrapper)
 add_subdirectory(benchmarks)
-add_subdirectory(tools)
+# add_subdirectory(tools)
 
 if(EXP_BUILD_TESTS)
   include(CTest)

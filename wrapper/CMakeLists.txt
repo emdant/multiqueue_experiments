@@ -77,106 +77,6 @@ if(EXP_TUNING_TARGETS)
       PARENT_SCOPE)
 endif()
 
-set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
-
-add_library(klsm ${KLSM_DIR}/src/util/thread_local_ptr.cpp)
-target_include_directories(klsm SYSTEM INTERFACE ${KLSM_DIR}/src
-                                                 ${KLSM_DIR}/src/util)
-add_library(klsm4 INTERFACE)
-target_link_libraries(klsm4 INTERFACE klsm)
-set_property(TARGET klsm4 PROPERTY pq_name klsm4)
-target_compile_definitions(
-  klsm4
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=4)
-add_library(klsm256 INTERFACE)
-target_link_libraries(klsm256 INTERFACE klsm)
-set_property(TARGET klsm256 PROPERTY pq_name klsm256)
-target_compile_definitions(
-  klsm256
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=256)
-add_library(klsm1024 INTERFACE)
-target_link_libraries(klsm1024 INTERFACE klsm)
-set_property(TARGET klsm1024 PROPERTY pq_name klsm1024)
-target_compile_definitions(
-  klsm1024
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=1024)
-add_library(klsm4096 INTERFACE)
-target_link_libraries(klsm4096 INTERFACE klsm)
-set_property(TARGET klsm4096 PROPERTY pq_name klsm4096)
-target_compile_definitions(
-  klsm4096
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=4096)
-
-add_library(smq INTERFACE)
-set_property(TARGET smq PROPERTY pq_name smq)
-target_compile_definitions(smq INTERFACE PQ_SMQ)
-
-add_library(
-  linden
-  ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
-  ${KLSM_DIR}/lib/spraylist_linden/linden.c
-  ${KLSM_DIR}/lib/spraylist_linden/gc/gc.c
-  ${KLSM_DIR}/lib/spraylist_linden/gc/ptst.c)
-target_compile_options(linden PRIVATE -w -std=gnu++17)
-target_compile_definitions(linden PUBLIC INTEL
-                                         CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
-target_include_directories(
-  linden SYSTEM
-  PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
-         ${KLSM_DIR}/lib/spraylist_linden/include)
-set_property(TARGET linden PROPERTY pq_name linden)
-target_compile_definitions(linden INTERFACE PQ_LINDEN)
-
-add_library(
-  capq STATIC
-  ${KLSM_DIR}/lib/capq/capq.c
-  ${KLSM_DIR}/lib/capq/fat_skiplist.c
-  ${KLSM_DIR}/lib/capq/qdlocksrc/locks/qd_lock.c
-  ${KLSM_DIR}/lib/capq/qdlocksrc/locks/tatas_lock.c
-  ${KLSM_DIR}/lib/capq/gc/gc.c
-  ${KLSM_DIR}/lib/capq/gc/ptst.c)
-target_include_directories(
-  capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
-                     ${KLSM_DIR}/lib/capq/qdlocksrc)
-target_compile_options(capq PRIVATE -w -std=gnu++17)
-target_compile_definitions(capq PUBLIC INTEL
-                                       CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
-target_compile_definitions(capq INTERFACE PQ_CAPQ)
-
-add_library(
-  spraylist
-  ${KLSM_DIR}/lib/spraylist_linden/fraser.c
-  ${KLSM_DIR}/lib/spraylist_linden/intset.c
-  ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
-  ${KLSM_DIR}/lib/spraylist_linden/linden.c
-  ${KLSM_DIR}/lib/spraylist_linden/measurements.c
-  ${KLSM_DIR}/lib/spraylist_linden/pqueue.c
-  ${KLSM_DIR}/lib/spraylist_linden/skiplist.c
-  ${KLSM_DIR}/lib/spraylist_linden/ssalloc.c)
-target_compile_options(spraylist PRIVATE -w -std=gnu17)
-target_compile_definitions(
-  spraylist PUBLIC INTEL LOCKFREE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
-target_include_directories(
-  spraylist SYSTEM
-  PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
-         ${KLSM_DIR}/lib/spraylist_linden/include)
-set_property(TARGET spraylist PROPERTY pq_name spraylist)
-target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
-
-find_package(TBB)
-
-if(TBB_FOUND)
-  add_library(tbb_pq INTERFACE)
-  target_link_libraries(tbb_pq INTERFACE tbb)
-  target_compile_definitions(tbb_pq INTERFACE PQ_TBB_PQ)
-else()
-  message(WARNING "TBB not found, not building TBB priority queue")
-endif()
-
 add_library(locked_pq INTERFACE)
 target_compile_definitions(locked_pq INTERFACE PQ_LOCKED_PQ)
 
@@ -186,27 +86,12 @@ target_compile_definitions(mq_pq INTERFACE PQ_MQ_PQ)
 
 set(COMPETITORS
     ${MQ_VARIANTS}
-    klsm4
-    klsm256
-    klsm1024
-    klsm4096
-    smq
-    linden
-    capq
-    spraylist
-    tbb_pq
     locked_pq
     mq_pq
     PARENT_SCOPE)
 
 set(GENERIC_COMPETITORS
     ${MQ_VARIANTS}
-    klsm4
-    klsm256
-    klsm1024
-    klsm4096
-    smq
-    tbb_pq
     locked_pq
     mq_pq
     PARENT_SCOPE)

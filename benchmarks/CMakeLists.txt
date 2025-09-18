@@ -25,6 +25,11 @@ add_library(dijkstra_base INTERFACE)
 target_sources(dijkstra_base INTERFACE dijkstra.cpp "util/threading.cpp")
 target_link_libraries(dijkstra_base INTERFACE benchmark_base Threads::Threads)
 
+add_library(dijkstra_ctime_base INTERFACE)
+target_sources(dijkstra_ctime_base INTERFACE dijkstra.cpp "util/threading.cpp")
+target_link_libraries(dijkstra_ctime_base INTERFACE benchmark_base Threads::Threads)
+target_compile_definitions(dijkstra_ctime_base INTERFACE COUNT_TIME)
+
 add_library(knapsack_base INTERFACE)
 target_sources(knapsack_base INTERFACE knapsack.cpp "util/threading.cpp")
 target_link_libraries(knapsack_base INTERFACE benchmark_base Threads::Threads)
@@ -40,7 +45,7 @@ if(EXP_TUNING_TARGETS)
   add_custom_target(tuning_log_all)
 endif()
 
-foreach(benchmark monotonic push_pop dijkstra knapsack knapsack_float)
+foreach(benchmark monotonic push_pop dijkstra dijkstra_ctime knapsack knapsack_float)
   add_custom_target(${benchmark}_all)
   add_custom_target(${benchmark}_log_all)
   if(EXP_TUNING_TARGETS)
@@ -50,9 +55,18 @@ foreach(benchmark monotonic push_pop dijkstra knapsack knapsack_float)
 endforeach()
 
 function(add_benchmark benchmark target)
-  add_executable(${benchmark}_${target})
-  target_link_libraries(${benchmark}_${target} PRIVATE ${target}
+  add_custom_target(${benchmark}_${target})
+
+  add_executable(${benchmark}_${target}-int32)
+  add_executable(${benchmark}_${target}-float)
+
+  target_link_libraries(${benchmark}_${target}-int32 PRIVATE ${target}
                                                        ${benchmark}_base)
+  target_link_libraries(${benchmark}_${target}-float PRIVATE ${target}
+                                                       ${benchmark}_base)
+  target_compile_definitions(${benchmark}_${target}-float PRIVATE USE_FLOAT)
+
+  add_dependencies(${benchmark}_${target} ${benchmark}_${target}-int32 ${benchmark}_${target}-float)
 
   add_executable(${benchmark}_log_${target})
   target_link_libraries(${benchmark}_log_${target} PRIVATE ${target}
@@ -61,7 +75,7 @@ function(add_benchmark benchmark target)
 endfunction()
 
 foreach(target ${COMPETITORS})
-  foreach(benchmark monotonic push_pop dijkstra knapsack)
+  foreach(benchmark monotonic push_pop dijkstra dijkstra_ctime knapsack)
     add_benchmark(${benchmark} ${target})
     add_dependencies(${benchmark}_all ${benchmark}_${target})
     add_dependencies(${benchmark}_log_all ${benchmark}_log_${target})
@@ -76,7 +90,7 @@ endforeach()
 
 if(EXP_TUNING_TARGETS)
   foreach(target ${TUNING_TARGETS})
-    foreach(benchmark monotonic push_pop dijkstra knapsack knapsack_float)
+    foreach(benchmark monotonic push_pop dijkstra dijkstra_ctime knapsack knapsack_float)
       add_benchmark(${benchmark} ${target})
       add_dependencies(${benchmark}_tuning_all ${benchmark}_${target})
       add_dependencies(${benchmark}_log_tuning_all ${benchmark}_log_${target})
@@ -86,8 +100,3 @@ endif()
 
 add_executable(dijkstra_seq dijkstra_seq.cpp)
 target_link_libraries(dijkstra_seq PRIVATE benchmark_base)
-add_executable(knapsack_seq knapsack_seq.cpp)
-target_link_libraries(knapsack_seq PRIVATE benchmark_base)
-add_executable(knapsack_float_seq knapsack_seq.cpp)
-target_link_libraries(knapsack_float_seq PRIVATE benchmark_base)
-target_compile_definitions(knapsack_float_seq PRIVATE FLOAT_INSTANCE)

@@ -1,4 +1,0 @@
-data/kplib/04AlmostStronglyCorrelated/n00500/R01000/s069.kp 157713
-data/kplib/09SpannerStronglyCorrelated/n00200/R10000/s002.kp 1034772
-data/kplib/08SpannerWeaklyCorrelated/n00200/R10000/s000.kp 403248
-data/kplib/02StronglyCorrelated/n01000/R01000/s014.kp 314366
