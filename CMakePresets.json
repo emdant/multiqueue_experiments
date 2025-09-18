@@ -10,8 +10,8 @@
       "hidden": true,
       "environment": {
         "WARNINGS": "-Wall -Wextra -Wpedantic",
-        "DEFAULT_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto",
-        "RELEASE_FLAGS": "-O3 -DNDEBUG -march=native -flto=auto",
+        "DEFAULT_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native",
+        "RELEASE_FLAGS": "-O3 -DNDEBUG -march=native",
         "DEBUG_FLAGS": "-Og -ggdb"
       }
     },

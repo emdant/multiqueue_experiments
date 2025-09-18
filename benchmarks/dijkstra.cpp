@@ -20,6 +20,8 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <numeric>
 #include <vector>
 
 #ifdef USE_FLOAT
@@ -43,7 +45,9 @@ struct Settings {
     pq_type::settings_type pq_settings{};
 };
 
-void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+Settings settings{};
+
+void register_cmd_options(cxxopts::Options& cmd) {
     // clang-format off
     cmd.add_options()
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
@@ -56,7 +60,7 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
     cmd.parse_positional({"graph"});
 }
 
-void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+void write_settings_human_readable(std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n';
     out << "Trials: " << settings.trials << '\n';
     out << "Graph: " << settings.graph_file << '\n';
@@ -65,7 +69,7 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
     settings.pq_settings.write_human_readable(out);
 }
 
-void write_settings_json(Settings const& settings, std::ostream& out) {
+void write_settings_json(std::ostream& out) {
     out << '{';
     out << std::quoted("num_threads") << ':' << settings.num_threads << ',';
     out << std::quoted("num_trials") << ':' << settings.trials << ',';
@@ -81,6 +85,9 @@ struct Counter {
     CumulativeTimer push_timer;
     CumulativeTimer pop_timer;
 #endif
+    long long pushed_nodes{0};
+    long long ignored_nodes{0};
+    long long processed_nodes{0};
 };
 
 struct alignas(L1_CACHE_LINE_SIZE) AtomicDistance {
@@ -91,11 +98,13 @@ struct SharedData {
     WGraph& graph;
     std::vector<AtomicDistance> distances;
     termination_detection::TerminationDetection termination_detection;
+    std::atomic_llong missing_nodes{0};
 };
 
 void process_node(node_type const& node, handle_type& handle, Counter& counter, SharedData& data) {
     WeightT current_distance = data.distances[node.second].value.load(std::memory_order_relaxed);
     if (static_cast<WeightT>(node.first) > current_distance) {
+        ++counter.ignored_nodes;
         return;
     }
     for (WNode wn : data.graph.out_neigh(node.second)) {
@@ -107,14 +116,17 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
 #ifdef COUNT_TIME
                 counter.push_timer.Start();
 #endif
-                handle.push({d, target});
+                if (handle.push({d, target})) {
+                    ++counter.pushed_nodes;
 #ifdef COUNT_TIME
-                counter.push_timer.Stop();
+                    counter.push_timer.Stop();
 #endif
+                }
                 break;
             }
         }
     }
+    ++counter.processed_nodes;
 }
 
 [[gnu::noinline]] Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq, SharedData& data,
@@ -124,22 +136,36 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     if (thread_context.id() == 0) {
         data.distances[src].value = 0;
         handle.push({0, src});
+        ++counter.pushed_nodes;
     }
     thread_context.synchronize();
-    std::optional<node_type> node;
-    while (data.termination_detection.repeat([&]() {
+    while (true) {
+        std::optional<node_type> node;
+        while (data.termination_detection.repeat([&]() {
 #ifdef COUNT_TIME
-        counter.pop_timer.Start();
+            counter.pop_timer.Start();
 #endif
-        node = handle.try_pop();
+            node = handle.try_pop();
 #ifdef COUNT_TIME
-        counter.pop_timer.Stop();
+            counter.pop_timer.Stop();
 #endif
-        return node.has_value();
-    })) {
-        process_node(*node, handle, counter, data);
+            return node.has_value();
+        })) {
+            process_node(*node, handle, counter, data);
+        }
+        data.missing_nodes.fetch_add(counter.pushed_nodes - counter.processed_nodes - counter.ignored_nodes,
+                                     std::memory_order_relaxed);
+        thread_context.synchronize();
+        if (data.missing_nodes.load(std::memory_order_relaxed) == 0) {
+            break;
+        }
+        thread_context.synchronize();
+        if (thread_context.id() == 0) {
+            data.missing_nodes.store(0, std::memory_order_relaxed);
+            data.termination_detection.reset();
+        }
+        thread_context.synchronize();
     }
-    thread_context.synchronize();
     return counter;
 }
 
@@ -158,6 +184,7 @@ void run_benchmark(WGraph& g, Settings const& settings) {
                                                }};
     dispatcher.wait();
     auto end_time = std::chrono::steady_clock::now();
+
 #ifdef COUNT_TIME
     double push_time = 0, pop_time = 0;
     for (auto i = 0; i < settings.num_threads; i++) {
@@ -167,7 +194,14 @@ void run_benchmark(WGraph& g, Settings const& settings) {
     push_time /= settings.num_threads;
     pop_time /= settings.num_threads;
 #endif
-    auto longest_distance =
+    auto total_counts =
+        std::accumulate(thread_counter.begin(), thread_counter.end(), Counter{}, [](auto sum, auto const& counter) {
+            sum.pushed_nodes += counter.pushed_nodes;
+            sum.processed_nodes += counter.processed_nodes;
+            sum.ignored_nodes += counter.ignored_nodes;
+            return sum;
+        });
+    auto furthest_node =
         std::max_element(shared_data.distances.begin(), shared_data.distances.end(), [](auto const& a, auto const& b) {
             auto a_val = a.value.load(std::memory_order_relaxed);
             auto b_val = b.value.load(std::memory_order_relaxed);
@@ -185,7 +219,13 @@ void run_benchmark(WGraph& g, Settings const& settings) {
         return d.value.load(std::memory_order_relaxed) != std::numeric_limits<WeightT>::max();
     });
     std::clog << "Nodes reached: " << num_reached << '\n';
-    std::clog << "Longest distance: " << longest_distance << std::endl;
+    std::clog << "Longest distance: " << furthest_node << std::endl;
+    std::clog << "Processed nodes: " << total_counts.processed_nodes << '\n';
+    std::clog << "Ignored nodes: " << total_counts.ignored_nodes << '\n';
+    if (total_counts.processed_nodes + total_counts.ignored_nodes != total_counts.pushed_nodes) {
+        std::cerr << "Warning: Not all nodes were popped\n";
+        std::cerr << "Probably the priority queue discards duplicate keys\n";
+    }
 
 #ifdef COUNT_TIME
     std::clog << "Push time: " << push_time << '\n';
@@ -212,8 +252,7 @@ int main(int argc, char* argv[]) {
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help");
-    Settings settings{};
-    register_cmd_options(settings, cmd);
+    register_cmd_options(cmd);
 
     try {
         auto args = cmd.parse(argc, argv);
@@ -228,7 +267,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::clog << "= Settings =\n";
-    write_settings_human_readable(settings, std::clog);
+    write_settings_human_readable(std::clog);
     std::clog << '\n';
 
     std::clog << "Reading graph...\n";

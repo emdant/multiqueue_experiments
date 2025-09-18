@@ -1,5 +1,7 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
+find_package(GSL)
+
 add_library(mq INTERFACE)
 target_link_libraries(mq INTERFACE multiqueue::multiqueue)
 target_compile_definitions(mq INTERFACE PQ_MQ)
