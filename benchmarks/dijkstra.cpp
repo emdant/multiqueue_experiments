@@ -41,6 +41,7 @@ struct Settings {
     int trials = 1;
     std::filesystem::path graph_file;
     std::filesystem::path sources_file = "";
+    std::filesystem::path weights_file = "";
     unsigned int seed = 1;
     pq_type::settings_type pq_settings{};
 };
@@ -54,7 +55,8 @@ void register_cmd_options(cxxopts::Options& cmd) {
         ("S,sources", "The number of source nodes", cxxopts::value<int>(settings.sources), "NUMBER")
         ("n,trials", "The number of trials per source", cxxopts::value<int>(settings.trials), "NUMBER")
         ("graph", "The input graph", cxxopts::value<std::filesystem::path>(settings.graph_file), "PATH")
-        ("z,sources_file", "The input sources", cxxopts::value<std::filesystem::path>(settings.sources_file), "PATH");
+        ("z,sources_file", "The input sources", cxxopts::value<std::filesystem::path>(settings.sources_file), "PATH")
+        ("w,weights_file", "The input weights", cxxopts::value<std::filesystem::path>(settings.weights_file), "PATH");
     // clang-format on
     settings.pq_settings.register_cmd_options(cmd);
     cmd.parse_positional({"graph"});
@@ -66,6 +68,7 @@ void write_settings_human_readable(std::ostream& out) {
     out << "Graph: " << settings.graph_file << '\n';
     out << "Sources: " << ((settings.sources_file.string() == "") ? "randomly generated" : settings.sources_file)
         << '\n';
+    out << "Weights: " << ((settings.sources_file.string() == "") ? "natural" : settings.weights_file) << '\n';
     settings.pq_settings.write_human_readable(out);
 }
 
@@ -273,6 +276,11 @@ int main(int argc, char* argv[]) {
     std::clog << "Reading graph...\n";
     WGraph g = MakeWeightedGraph(settings.graph_file.string());
     g.PrintStats();
+
+    if (settings.weights_file != "") {
+        VectorReader<WeightT> reader(settings.weights_file);
+        g.ReplaceWeights(reader.ReadSerialized());
+    }
 
     SourcePicker<WGraph> sp(g, settings.sources_file.string());
     std::clog << "= Running benchmark =\n";

@@ -4,10 +4,12 @@
 #ifndef GRAPH_H_
 #define GRAPH_H_
 
+#include <assert.h>
 #include <algorithm>
 #include <cstddef>
 #include <iostream>
 #include <type_traits>
+#include <vector>
 
 #include "pvector.h"
 #include "util.h"
@@ -26,6 +28,8 @@ Simple container for graph in CSR format
 // Used to hold node & weight, with another node it makes a weighted edge
 template <typename NodeID_, typename WeightT_>
 struct NodeWeight {
+    using WeightT = WeightT_;
+
     NodeID_ v;
     WeightT_ w;
     NodeWeight() {
@@ -282,6 +286,32 @@ class CSRGraph {
 
     Range<NodeID_> vertices() const {
         return Range<NodeID_>(num_nodes());
+    }
+
+    template <typename Dest = DestID_, typename = typename std::enable_if<!std::is_same<NodeID_, Dest>::value>>
+    void ReplaceWeights(const std::vector<typename Dest::WeightT>& weights) {
+        using WNode = NodeWeight<NodeID_, typename Dest::WeightT>;
+
+        const int64_t out_edges = out_index_[num_nodes_] - out_index_[0];
+        assert(weights.size() == static_cast<size_t>(out_edges) && "weights vector has incorrect size");
+
+        for (int64_t i = 0; i < out_edges; i++) {
+            out_neighbors_[i].w = weights[i];
+        }
+
+        if (directed_ && MakeInverse) {
+            auto compare_node = [](const WNode& a, const WNode& b) { return a.v < b.v; };
+
+            for (NodeID_ u = 0; u < num_nodes_; u++) {
+                for (WNode& wn : out_neigh(u)) {
+                    WNode dummy(u);
+
+                    auto inneigh = in_neigh(wn.v);
+                    auto it = std::lower_bound(inneigh.begin(), inneigh.end(), dummy, compare_node);
+                    (*it).w = wn.w;
+                }
+            }
+        }
     }
 
    private:
