@@ -5,6 +5,7 @@
 #include "util/thread_coordination.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cxxopts.hpp>
 
@@ -94,12 +95,12 @@ struct Counter {
 };
 
 struct alignas(L1_CACHE_LINE_SIZE) AtomicDistance {
-    std::atomic<WeightT> value{std::numeric_limits<WeightT>::max()};
+    std::atomic<WeightT> value;
 };
 
 struct SharedData {
     WGraph& graph;
-    std::vector<AtomicDistance> distances;
+    std::unique_ptr<AtomicDistance[]> distances;
     termination_detection::TerminationDetection termination_detection;
     std::atomic_llong missing_nodes{0};
 };
@@ -173,19 +174,33 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
 }
 
 void run_benchmark(WGraph& g, Settings const& settings) {
+    auto start_time = std::chrono::steady_clock::now();
     SharedData shared_data{g, {}, termination_detection::TerminationDetection(settings.num_threads)};
 
-    shared_data.distances = std::vector<AtomicDistance>(shared_data.graph.num_nodes());
+    shared_data.distances = std::unique_ptr<AtomicDistance[]>(new AtomicDistance[shared_data.graph.num_nodes()]);
+    thread_coordination::Dispatcher dispatcher_init{
+        settings.num_threads, [&](auto ctx) {
+            auto num_nodes = shared_data.graph.num_nodes();
+            auto num_threads = settings.num_threads;
+            auto t_id = static_cast<std::size_t>(ctx.id());
+
+            size_t start = (t_id * num_nodes) / num_threads;
+            size_t end = ((t_id + 1) * num_nodes) / num_threads;
+
+            for (size_t i = start; i < end; ++i) {
+                shared_data.distances[i].value.store(std::numeric_limits<WeightT>::max(), std::memory_order_relaxed);
+            }
+        }};
+    dispatcher_init.wait();
 
     std::vector<Counter> thread_counter(static_cast<std::size_t>(settings.num_threads));
     auto pq = pq_type(settings.num_threads, shared_data.graph.num_nodes(), settings.pq_settings);
-    auto start_time = std::chrono::steady_clock::now();
-    thread_coordination::Dispatcher dispatcher{settings.num_threads, [&](auto ctx) {
-                                                   auto t_id = static_cast<std::size_t>(ctx.id());
-                                                   thread_counter[t_id] =
-                                                       benchmark_thread(ctx, pq, shared_data, settings.src);
-                                               }};
-    dispatcher.wait();
+    thread_coordination::Dispatcher dispatcher_algo{settings.num_threads, [&](auto ctx) {
+                                                        auto t_id = static_cast<std::size_t>(ctx.id());
+                                                        thread_counter[t_id] =
+                                                            benchmark_thread(ctx, pq, shared_data, settings.src);
+                                                    }};
+    dispatcher_algo.wait();
     auto end_time = std::chrono::steady_clock::now();
 
 #ifdef COUNT_TIME
@@ -204,21 +219,25 @@ void run_benchmark(WGraph& g, Settings const& settings) {
             sum.ignored_nodes += counter.ignored_nodes;
             return sum;
         });
-    auto furthest_node =
-        std::max_element(shared_data.distances.begin(), shared_data.distances.end(), [](auto const& a, auto const& b) {
-            auto a_val = a.value.load(std::memory_order_relaxed);
-            auto b_val = b.value.load(std::memory_order_relaxed);
-            if (b_val == std::numeric_limits<WeightT>::max()) {
-                return false;
-            }
-            if (a_val == std::numeric_limits<WeightT>::max()) {
-                return true;
-            }
-            return a_val < b_val;
-        })->value.load();
+
+    auto num_nodes = shared_data.graph.num_nodes();
+    auto begin_ptr = shared_data.distances.get();
+    auto end_ptr = shared_data.distances.get() + num_nodes;
+
+    auto furthest_node = std::max_element(begin_ptr, end_ptr, [](auto const& a, auto const& b) {
+                             auto a_val = a.value.load(std::memory_order_relaxed);
+                             auto b_val = b.value.load(std::memory_order_relaxed);
+                             if (b_val == std::numeric_limits<WeightT>::max()) {
+                                 return false;
+                             }
+                             if (a_val == std::numeric_limits<WeightT>::max()) {
+                                 return true;
+                             }
+                             return a_val < b_val;
+                         })->value.load();
     std::clog << "Time (s): " << std::fixed << std::setprecision(6)
               << std::chrono::duration<double>(end_time - start_time).count() << '\n';
-    NodeID num_reached = std::count_if(shared_data.distances.begin(), shared_data.distances.end(), [&](auto const& d) {
+    NodeID num_reached = std::count_if(begin_ptr, end_ptr, [&](auto const& d) {
         return d.value.load(std::memory_order_relaxed) != std::numeric_limits<WeightT>::max();
     });
     std::clog << "Nodes reached: " << num_reached << '\n';
