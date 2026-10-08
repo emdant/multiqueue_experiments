@@ -93,7 +93,7 @@ struct Counter {
     long long processed_nodes{0};
 };
 
-struct alignas(L1_CACHE_LINE_SIZE) AtomicDistance {
+struct AtomicDistance {
     std::atomic<WeightT> value{std::numeric_limits<WeightT>::max()};
 };
 
